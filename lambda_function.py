@@ -9,17 +9,16 @@ from scipy.signal import fftconvolve
 s3 = boto3.client('s3')
 
 class CFD_Data(object):
-    def __init__(self,filename,nH=101,nPx=421,D=26):
-        
-        print '@(CFD_Data)>> Loading %s...'%filename
+    def __init__(self,raw_data,wlm=0.5,nH=101,nPx=511,D=26):
+
+        self.wlm = wlm
         self.OSS_M1_vertex = 3.9
-        self.data = np.loadtxt(filename,
-                     delimiter=',',skiprows=1)
+        self.data = raw_data
         self.data[:,4] -= self.OSS_M1_vertex
-        print '@(CFD_Data)>> Total number of sample: %d'%self.data.shape[0]
-        print '@(CFD_Data)>> Z min/max: %.3f/%.3f meter'%(self.z.min(),self.z.max())
+        #print('@(CFD_Data)>> Total number of sample: %d'%self.data.shape[0])
+        #print('@(CFD_Data)>> Z min/max: %.3f/%.3f meter'%(self.z.min(),self.z.max()))
         
-        print '@(CFD_Data)>> Nearest interpolation to a gridded mesh ...'
+        #print('@(CFD_Data)>> Nearest interpolation to a gridded mesh ...')
         self.nearest = NearestNDInterpolator(self.data[:,2:],self.ri.ravel())
         zo = np.linspace(self.z.min(),self.z.max(),nH)
         self.resh = zo[1] - zo[0]
@@ -27,7 +26,7 @@ class CFD_Data(object):
         x3d,y3d,z3d = np.meshgrid(uo,uo,zo,indexing='ij',sparse=True)
         ri_gridded = self.nearest(x3d,y3d,z3d)
         
-        print '@(CFD_Data)>> Setting the tri-linear interpolator ...'
+        #print('@(CFD_Data)>> Setting the tri-linear interpolator ...')
         self.interpolate = RegularGridInterpolator((uo,uo,zo),ri_gridded)
 
     def __call__(self,xi,yi,zi,s):
@@ -38,10 +37,13 @@ class CFD_Data(object):
         return opl - np.mean(opl)
     @property
     def ri(self):
-        return self.data[:,0][:,None]
+        pref = 75000.0 # Reference pressure
+        tp = self.T
+        _ri_ = 7.76e-7*pref*(1+0.00752/self.wlm**2)/tp # create refractive index from temperature
+        return _ri_
     @property
     def T(self):
-        return self.data[:,1][:,None]
+        return self.data[:,0][:,None]
     @property
     def x(self):
         return self.data[:,2][:,None]
@@ -91,17 +93,15 @@ def rayTrace(cfd,xyz,klm,zmin,zmax,v,nPx,nh=101,method='nearest'):
         return opl
 
 
-def dome_seeing(filename,ceo,D=25.5,resh=0.25,nPx=401):
+def dome_seeing(cfd,ceo,wlm,D=25.5,resh=0.25,nPx=401):
 
-    cfd = CFD_Data(filename)
+    cfd.wlm = wlm
 
     xyz = ceo['xyz']
     klm = ceo['klm']
     v = ceo['v']
     m = ceo['m']
     nPx = ceo['nPx']
-    C = ceo['C']
-    AW0 = ceo['AW0']
 
     opl_1 = rayTrace(cfd,xyz[0][v,:],klm[0][v,:],xyz[1][v,2],cfd.z.max()*np.ones(v.sum()),v,nPx)
     opl0_1 = rayTrace(cfd,np.asanyarray([0,0,cfd.z.max()]),np.asanyarray([0,0,-1]),np.asanyarray(0.0),cfd.z.max(),v,nPx)
@@ -114,45 +114,77 @@ def dome_seeing(filename,ceo,D=25.5,resh=0.25,nPx=401):
     opd[m.reshape(nPx,nPx)==1] = np.NaN
     opd -= np.nanmean(opd)
 
+    if wlm==0.5:
+        C = ceo['V_C']
+        AW0 = ceo['V_AW0']
+    if wlm==1.65:
+        C = ceo['H_C']
+        AW0 = ceo['H_AW0']
     A = opd.copy()
     A[np.isnan(opd)] = 0.0
     A[~np.isnan(opd)] = 1.0
     F = opd.copy()
     F[np.isnan(opd)] = 0.0
-    wavelength = 500e-9
-    k = 2.*np.pi/wavelength
+    k = 2e6*np.pi/wlm
     W = A*np.exp(1j*k*F)
     S1 = np.fliplr(np.flipud(W))
     S2 = np.conj(W)
     AW = fftconvolve(S1,S2)
     pssn = np.sum(np.abs(AW*C)**2)/np.sum(np.abs(AW0*C)**2)
-
-    print 'PSSNn=%.4f'%pssn
+    #print('PSSNn=%.4f'%pssn)
 
     return {'opd':opd,'PSSn':pssn}
 
 def lambda_handler(event, context):
 
     for record in event['Records']:
-        print record
-        key = urllib.unquote(record['s3']['object']['key'])
-        print key
-        downfile = '/tmp/'+key
-        s3.download_file('cfd.scattered',key,downfile)
 
-        ceodatafile = '/tmp/cfdRaytrace.npz'
-        if not os.path.isfile(ceodatafile):
-            s3.download_file('gmto.rconan','cfdRaytrace.npz',ceodatafile)
-        ceo = np.load(ceodatafile)
-        data = dome_seeing(downfile,ceo)
-        os.remove(downfile)
-        filename, file_extension = os.path.splitext(key)
-        upkey = 'reduced_'+filename+'.mat'
-        upfile='/tmp/'+upkey
-        savemat(upfile,data)
+        try:
 
-        s3.upload_file(upfile,'cfd.gridded',upkey)
-        os.remove(upfile)
+            #print(record)
+            key = urllib.parse.unquote(record['s3']['object']['key'])
+            #print(key)
+            downfile = '/tmp/'+key
+            s3.download_file('cfd.scattered',key,downfile)
+            print('@(CFD_Data)>> Loading %s...'%downfile)
+            raw_data = np.loadtxt(downfile,
+                                  delimiter=',',skiprows=1)
+            os.remove(downfile)
+            cfd = CFD_Data(raw_data)
+
+            ceodatafile = '/tmp/cfdRaytrace.npz'
+            if not os.path.isfile(ceodatafile):
+                s3.download_file('gmto.rconan','cfdRaytrace.npz',ceodatafile)
+            ceo = np.load(ceodatafile)
+
+            data = dome_seeing(cfd,ceo,0.5)
+            filename, file_extension = os.path.splitext(key)
+            upkey = 'V_reduced_'+filename+'.mat'
+            upfile='/tmp/'+upkey
+            savemat(upfile,data)
+            s3.upload_file(upfile,'cfd.gridded',upkey)
+            os.remove(upfile)
+            print('@(CFD_Data)>> Removed %s'%upfile)
+
+            data = dome_seeing(cfd,ceo,1.65)
+            filename, file_extension = os.path.splitext(key)
+            upkey = 'H_reduced_'+filename+'.mat'
+            upfile='/tmp/'+upkey
+            savemat(upfile,data)
+            s3.upload_file(upfile,'cfd.gridded',upkey)
+            os.remove(upfile)
+            print('@(CFD_Data)>> Removed %s'%upfile)
+
+        except:
+
+            key = urllib.parse.unquote(record['s3']['object']['key'])
+            downfile = '/tmp/'+key
+            if os.path.isfile(downfile):
+                os.remove(downfile)
+            s3.delete_object(Bucket='cfd.scattered',Key=key)
+            print('@(CFD_Data)>> %s deleted!'%key)
+            raise
+
 
     return 'Interpolation completed!'
 
