@@ -5,36 +5,37 @@ import urllib
 from scipy.interpolate import NearestNDInterpolator, LinearNDInterpolator, interpn, RegularGridInterpolator
 from scipy.io import savemat
 from scipy.signal import fftconvolve
+import gzip
 
 s3 = boto3.client('s3')
 
 class CFD_Data(object):
-    def __init__(self,raw_data,wlm=0.5,nH=101,nPx=511,D=26):
+    def __init__(self,raw_data,wlm=0.5,nH=81,nPx=43,D=26.25):
 
         self.wlm = wlm
         self.OSS_M1_vertex = 3.9
         self.data = raw_data
         self.data[:,4] -= self.OSS_M1_vertex
-        #print('@(CFD_Data)>> Total number of sample: %d'%self.data.shape[0])
-        #print('@(CFD_Data)>> Z min/max: %.3f/%.3f meter'%(self.z.min(),self.z.max()))
+        ##$print('@(CFD_Data)>> Total number of sample: %d'%self.data.shape[0])
+        ##$print('@(CFD_Data)>> Z min/max: %.3f/%.3f meter'%(self.z.min(),self.z.max()))
         
-        #print('@(CFD_Data)>> Nearest interpolation to a gridded mesh ...')
-        self.nearest = NearestNDInterpolator(self.data[:,2:],self.ri.ravel())
-        zo = np.linspace(self.z.min(),self.z.max(),nH)
-        self.resh = zo[1] - zo[0]
-        uo = np.linspace(-1,1,nPx)*D/2
-        x3d,y3d,z3d = np.meshgrid(uo,uo,zo,indexing='ij',sparse=True)
-        ri_gridded = self.nearest(x3d,y3d,z3d)
+        #$print('@(CFD_Data)>> Nearest interpolation to a gridded mesh ...')
+        nearest = NearestNDInterpolator(self.data[:,2:],self.ri.ravel())
+        self.zo = np.linspace(self.z.min(),self.z.max(),nH)
+        self.resh = self.zo[1] - self.zo[0]
+        self.uo = np.linspace(-1,1,nPx)*D/2
+        x3d,y3d,z3d = np.meshgrid(self.uo,self.uo,self.zo,indexing='ij',sparse=True)
+        ri_gridded = nearest(x3d,y3d,z3d)
         
-        #print('@(CFD_Data)>> Setting the tri-linear interpolator ...')
-        self.interpolate = RegularGridInterpolator((uo,uo,zo),ri_gridded)
+        #$print('@(CFD_Data)>> Setting the tri-linear interpolator ...')
+        self.interpolate = RegularGridInterpolator((self.uo,self.uo,self.zo),ri_gridded)
 
     def __call__(self,xi,yi,zi,s):
         xyzi = np.stack([xi,yi,zi],xi.ndim)
-        ri_i = 1 + self.interpolate(xyzi)
+        ri_i = self.interpolate(xyzi)
         ds = np.diff(s,1)
         opl = np.sum(np.abs(ds)*ri_i[:,1:],axis=1,dtype=np.float64)
-        return opl - np.mean(opl)
+        return opl
     @property
     def ri(self):
         pref = 75000.0 # Reference pressure
@@ -54,72 +55,7 @@ class CFD_Data(object):
     def z(self):
         return self.data[:,4][:,None]
 
-def rayTrace(cfd,xyz,klm,zmin,zmax,v,nPx,nh=101,method='nearest'):
-    
-    #print(zmin,zmax) 
-
-    x = xyz[...,0,None]
-    y = xyz[...,1,None]
-    z = xyz[...,2,None]
-    
-    k = klm[...,0,None]
-    l = klm[...,1,None]
-    m = klm[...,2,None]
-
-    #z0 = np.arange(zmin,zmax,resh)[None,...]
-    delta = zmax - zmin
-    step = delta/(nh-1)
-    u = np.arange(nh)
-    z0 = step[...,None]*u[None,...]
-    z0 += zmin[...,None]
-    z0[:,-1] = zmax
-    
-    s = (z0 - z)/m
-    xp = x + k*s
-    yp = y + l*s
-    zp = z + m*s
-    
-    #ds = np.abs(np.diff(s,axis=1))
-    #opl = ds.sum(axis=1)
-    opl = cfd(xp,yp,zp,s)
-    if opl.size>1:
-        #print(ds.sum(1))
-        #opd = cfd(xp,yp,zp,s)
-        #opd = s - 
-        opd2d = np.ones(nPx**2)*np.NaN
-        opd2d[v] = opl
-        return opd2d.reshape(nPx,nPx)
-    else:
-        return opl
-
-
-def dome_seeing(cfd,ceo,wlm,D=25.5,resh=0.25,nPx=401):
-
-    cfd.wlm = wlm
-
-    xyz = ceo['xyz']
-    klm = ceo['klm']
-    v = ceo['v']
-    m = ceo['m']
-    nPx = ceo['nPx']
-
-    opl_1 = rayTrace(cfd,xyz[0][v,:],klm[0][v,:],xyz[1][v,2],cfd.z.max()*np.ones(v.sum()),v,nPx)
-    opl0_1 = rayTrace(cfd,np.asanyarray([0,0,cfd.z.max()]),np.asanyarray([0,0,-1]),np.asanyarray(0.0),cfd.z.max(),v,nPx)
-    opl_2 = rayTrace(cfd,xyz[1][v,:],klm[1][v,:],xyz[1][v,2],xyz[2][v,2],v,nPx)
-    opl0_2 = rayTrace(cfd,np.asanyarray([0,0,0]),np.asanyarray([0,0,1]),np.asanyarray(0.0),xyz[2][v,2].max(),v,nPx)
-    opl_3 = rayTrace(cfd,xyz[2][v,:],klm[2][v,:],xyz[3][v,2],xyz[2][v,2],v,nPx)
-    opl0_3 =  rayTrace(cfd,np.asanyarray([0,0,xyz[2][v,2].max()]),np.asanyarray([0,0,-1]),xyz[3][v,2].max(),xyz[2][v,2].max(),v,nPx)
-
-    opd = opl_1+opl0_1+(opl_2+opl0_2)+(opl_3+opl0_3)
-    opd[m.reshape(nPx,nPx)==1] = np.NaN
-    opd -= np.nanmean(opd)
-
-    if wlm==0.5:
-        C = ceo['V_C']
-        AW0 = ceo['V_AW0']
-    if wlm==1.65:
-        C = ceo['H_C']
-        AW0 = ceo['H_AW0']
+def PSSn(opd,wlm,C,AW0):
     A = opd.copy()
     A[np.isnan(opd)] = 0.0
     A[~np.isnan(opd)] = 1.0
@@ -131,9 +67,83 @@ def dome_seeing(cfd,ceo,wlm,D=25.5,resh=0.25,nPx=401):
     S2 = np.conj(W)
     AW = fftconvolve(S1,S2)
     pssn = np.sum(np.abs(AW*C)**2)/np.sum(np.abs(AW0*C)**2)
-    #print('PSSNn=%.4f'%pssn)
+    return pssn
 
-    return {'opd':opd,'PSSn':pssn}
+def rayTrace(cfd,params,nH=81,cfd_nPx=43):
+
+    N_RAY = params['xyz0'].shape[0]
+    #print('Ray tracing (N_RAY=%d):'%N_RAY)
+    cfd_opd = np.ones(N_RAY)*np.nan
+    v123 = params['v1']*params['v2']*params['v3']*params['m']
+
+    a = 0
+    step = 200000
+    b = step
+    n_step = int(np.ceil(N_RAY/step))
+    for k in range(n_step):
+
+        #$print('. Rays range: [%d,%d]'%(a,b))
+        _ = np.s_[a:b]
+
+        #$print(' . Source to M1')
+        v = v123[_]
+        xyz_0 = params['xyz0'][_,:][v,:]
+        klm_0 = params['klm0'][_,:][v,:]
+        xyz_1 = params['xyz1'][_,:][v,:]
+
+        s_range = (xyz_1[:,-1] - xyz_0[:,-1])/klm_0[:,-1]/(nH-1)
+        u = np.arange(nH)
+        s = s_range[...,None]*u[None,...]
+
+        x = xyz_0[:,0][...,np.newaxis] + klm_0[:,0][...,np.newaxis]*s
+        y = xyz_0[:,1][...,np.newaxis] + klm_0[:,1][...,np.newaxis]*s
+        z = xyz_0[:,2][...,np.newaxis] + klm_0[:,2][...,np.newaxis]*s
+
+        cfd_opd1 = cfd(x,y,z,s)
+
+        #$print(' . M1 to M2')
+        xyz_0 = params['xyz1'][_,:][v,:]
+        klm_0 = params['klm1'][_,:][v,:]
+        xyz_1 = params['xyz2'][_,:][v,:]
+
+        s_range = (xyz_1[:,-1] - xyz_0[:,-1])/klm_0[:,-1]/(nH-1)
+        u = np.arange(nH)
+        s = s_range[...,None]*u[None,...]
+
+        x = xyz_0[:,0][...,np.newaxis] + klm_0[:,0][...,np.newaxis]*s
+        y = xyz_0[:,1][...,np.newaxis] + klm_0[:,1][...,np.newaxis]*s
+        z = xyz_0[:,2][...,np.newaxis] + klm_0[:,2][...,np.newaxis]*s
+
+        cfd_opd2 = cfd(x,y,z,s)
+
+        #$print(' . M2 to exit pupil')
+        xyz_0 = params['xyz2'][_,:][v,:]
+        klm_0 = params['klm2'][_,:][v,:]
+        xyz_1 = params['xyz3'][_,:][v,:]
+
+        s_range = (xyz_1[:,-1] - xyz_0[:,-1])/klm_0[:,-1]/(nH-1)
+        u = np.arange(nH)
+        s = s_range[...,None]*u[None,...]
+
+        x = xyz_0[:,0][...,np.newaxis] + klm_0[:,0][...,np.newaxis]*s
+        y = xyz_0[:,1][...,np.newaxis] + klm_0[:,1][...,np.newaxis]*s
+        z = xyz_0[:,2][...,np.newaxis] + klm_0[:,2][...,np.newaxis]*s
+
+        cfd_opd3 = cfd(x,y,z,s)
+
+        cfd_opd[_][v] = cfd_opd1+cfd_opd2+cfd_opd3
+
+        a = b
+        b = np.minimum(b+step,N_RAY)
+        
+    cfd_opd -= np.nanmean(cfd_opd)
+
+    n = int(np.sqrt(N_RAY))
+    V_PSSn = PSSn(cfd_opd.reshape(n,n),0.5,params['V_C'],params['V_AW0'])
+    H_PSSn = PSSn(cfd_opd.reshape(n,n),1.65,params['H_C'],params['H_AW0'])
+    print('PSSn:',V_PSSn,H_PSSn)
+
+    return {'opd':cfd_opd,'V_PSSn':V_PSSn,'H_PSSn':H_PSSn}
 
 def lambda_handler(event, context):
 
@@ -142,38 +152,41 @@ def lambda_handler(event, context):
         try:
 
             #print(record)
+            bucket = urllib.parse.unquote(record['s3']['bucket']['name'])
             key = urllib.parse.unquote(record['s3']['object']['key'])
-            #print(key)
-            downfile = '/tmp/'+key
-            s3.download_file('cfd.scattered',key,downfile)
-            print('@(CFD_Data)>> Loading %s...'%downfile)
-            raw_data = np.loadtxt(downfile,
-                                  delimiter=',',skiprows=1)
-            os.remove(downfile)
-            cfd = CFD_Data(raw_data)
+            ##$print(key)
+            downfile = '/tmp/'+key.split('/')[-1]
+            s3.download_file(bucket,key,downfile)
+            #$print('@(CFD_Data)>> Loading %s...'%downfile)
 
-            ceodatafile = '/tmp/cfdRaytrace.npz'
+            inF = gzip.GzipFile(downfile,'rb')
+            data = inF.read()
+            inF.close()
+            csvfile = '/tmp/data.csv'
+            outF = open(csvfile,'wb')
+            outF.write(data)
+            outF.close()
+            os.remove(downfile)
+            raw_data = np.loadtxt(csvfile,
+                                  delimiter=',',skiprows=1)
+            os.remove(csvfile)
+            cfd = CFD_Data(raw_data,nH=101,nPx=525)
+
+            ceodatafile = '/tmp/gs_onaxis_params_512.npz'
             if not os.path.isfile(ceodatafile):
-                s3.download_file('gmto.rconan','cfdRaytrace.npz',ceodatafile)
+                s3.download_file('cfd.archive','gs_onaxis_params_512.npz',ceodatafile)
             ceo = np.load(ceodatafile)
 
-            data = dome_seeing(cfd,ceo,0.5)
-            filename, file_extension = os.path.splitext(key)
-            upkey = 'V_reduced_'+filename+'.mat'
-            upfile='/tmp/'+upkey
-            savemat(upfile,data)
-            s3.upload_file(upfile,'cfd.gridded',upkey)
-            os.remove(upfile)
-            print('@(CFD_Data)>> Removed %s'%upfile)
+            data = rayTrace(cfd,ceo,nH=101)
 
-            data = dome_seeing(cfd,ceo,1.65)
             filename, file_extension = os.path.splitext(key)
-            upkey = 'H_reduced_'+filename+'.mat'
-            upfile='/tmp/'+upkey
+            filename, file_extension = os.path.splitext(filename)
+            upkey = filename+'.mat'
+            upfile='/tmp/'+upkey.split('/')[-1]
             savemat(upfile,data)
-            s3.upload_file(upfile,'cfd.gridded',upkey)
+            s3.upload_file(upfile,bucket,upkey)
             os.remove(upfile)
-            print('@(CFD_Data)>> Removed %s'%upfile)
+            ##$print('@(CFD_Data)>> Removed %s'%upfile)
 
         except:
 
@@ -181,8 +194,8 @@ def lambda_handler(event, context):
             downfile = '/tmp/'+key
             if os.path.isfile(downfile):
                 os.remove(downfile)
-            s3.delete_object(Bucket='cfd.scattered',Key=key)
-            print('@(CFD_Data)>> %s deleted!'%key)
+            #s3.delete_object(Bucket='cfd.scattered',Key=key)
+            #print('@(CFD_Data)>> %s deleted!'%key)
             raise
 
 
