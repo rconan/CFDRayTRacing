@@ -138,12 +138,14 @@ def rayTrace(cfd,params,nH=81,cfd_nPx=43):
         
     cfd_opd -= np.nanmean(cfd_opd)
 
+    return {'opd':cfd_opd,'opd max':np.nanmax(cfd_opd),'opd min':np.nanmin(cfd_opd)}#,'V_PSSn':V_PSSn,'H_PSSn':H_PSSn}
+
+"""
     n = int(np.sqrt(N_RAY))
     V_PSSn = PSSn(cfd_opd.reshape(n,n),0.5,params['V_C'],params['V_AW0'])
     H_PSSn = PSSn(cfd_opd.reshape(n,n),1.65,params['H_C'],params['H_AW0'])
     print('PSSn:',V_PSSn,H_PSSn)
-
-    return {'opd':cfd_opd,'V_PSSn':V_PSSn,'H_PSSn':H_PSSn}
+"""
 
 def lambda_handler(event, context):
 
@@ -181,11 +183,15 @@ def lambda_handler(event, context):
 
             filename, file_extension = os.path.splitext(key)
             filename, file_extension = os.path.splitext(filename)
-            upkey = filename+'.mat'
+            upkey = filename+'.npz'
+
             upfile='/tmp/'+upkey.split('/')[-1]
-            savemat(upfile,data)
+
+            #savemat(upfile,data)
+            np.savez(upfile,**data)
             s3.upload_file(upfile,bucket,upkey)
             os.remove(upfile)
+
             ##$print('@(CFD_Data)>> Removed %s'%upfile)
 
         except:
