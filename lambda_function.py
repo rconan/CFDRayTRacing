@@ -14,13 +14,15 @@ class CFD_Data(object):
 
         self.wlm = wlm
         self.OSS_M1_vertex = 3.9
+        if raw_data.shape[1]>3:
+            raw_data = np.delete(raw_data,1,1)
         self.data = raw_data
-        self.data[:,4] -= self.OSS_M1_vertex
+        self.data[:,-1] -= self.OSS_M1_vertex
         ##$print('@(CFD_Data)>> Total number of sample: %d'%self.data.shape[0])
         ##$print('@(CFD_Data)>> Z min/max: %.3f/%.3f meter'%(self.z.min(),self.z.max()))
         
         #$print('@(CFD_Data)>> Nearest interpolation to a gridded mesh ...')
-        nearest = NearestNDInterpolator(self.data[:,2:],self.ri.ravel())
+        nearest = NearestNDInterpolator(self.data[:,1:],self.ri.ravel())
         self.zo = np.linspace(self.z.min(),self.z.max(),nH)
         self.resh = self.zo[1] - self.zo[0]
         self.uo = np.linspace(-1,1,nPx)*D/2
@@ -47,13 +49,13 @@ class CFD_Data(object):
         return self.data[:,0][:,None]
     @property
     def x(self):
-        return self.data[:,2][:,None]
+        return self.data[:,1][:,None]
     @property
     def y(self):
-        return self.data[:,3][:,None]
+        return self.data[:,2][:,None]
     @property
     def z(self):
-        return self.data[:,4][:,None]
+        return self.data[:,3][:,None]
 
 def PSSn(opd,wlm,C,AW0):
     A = opd.copy()
