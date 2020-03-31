@@ -14,7 +14,7 @@ class CFD_Data(object):
 
         self.wlm = wlm
         self.OSS_M1_vertex = 3.9
-        if raw_data.shape[1]>3:
+        if raw_data.shape[1]>4:
             raw_data = np.delete(raw_data,1,1)
         self.data = raw_data
         self.data[:,-1] -= self.OSS_M1_vertex

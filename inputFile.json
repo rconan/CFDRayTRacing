@@ -20,14 +20,14 @@
             "s3SchemaVersion":"1.0",
             "configurationId":"testConfigRule",
             "bucket":{  
-               "name":"cfd.scattered",
+               "name":"gmto.starccm",
                "ownerIdentity":{  
                   "principalId":"A3NL1KOZZKExample"
                },
-               "arn":"arn:aws:s3:::cfd.scattered"
+               "arn":"arn:aws:s3:::gmto.starccm"
             },
             "object":{  
-               "key":"TEST/OPDData_OPDData_1.502000e+03.csv.gz",
+               "key":"Baseline2020/b2019_0z_0az_cd_12ms/OPDData_OPD_Data_5.000000e+02.csv.gz",
                "size":1024,
                "eTag":"d41d8cd98f00b204e9800998ecf8427e",
                "versionId":"096fKKXTRTtl3on89fVO.nfljtsv6qko"

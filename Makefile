@@ -7,4 +7,7 @@ upload:
 	aws s3 cp ../CFD.zip s3://gmto.starccm/
 	aws lambda update-function-code --region us-east-2 --function-name CFD2OPD --s3-bucket gmto.starccm --s3-key CFD.zip
 
+test:
+	aws lambda invoke --region us-east-2 --function-name CFD2OPD --invocation-type Event --payload file://inputFile.json outfile
+
 all: zip upload
