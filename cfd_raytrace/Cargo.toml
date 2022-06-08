@@ -1,0 +1,17 @@
+[package]
+name = "cfd_raytrace"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.57"
+csv = "1.1.6"
+flate2 = "1.0.24"
+nalgebra = "0.31.0"
+npyz = { version = "0.6.1", features = ["npz", "npyz-derive"] }
+rstar = "0.9.3"
+serde = { version = "1.0.137", features = ["derive"] }
+serde-pickle = "1.1.1"
+thiserror = "1.0.31"

@@ -6,8 +6,10 @@ from scipy.interpolate import NearestNDInterpolator, LinearNDInterpolator, inter
 from scipy.io import savemat
 from scipy.signal import fftconvolve
 import gzip
+from io import StringIO, BytesIO
+import botocore
 
-s3 = boto3.client('s3')
+#s3 = boto3.client('s3')
 
 class CFD_Data(object):
     def __init__(self,raw_data,wlm=0.5,nH=81,nPx=43,D=26.25):
@@ -30,7 +32,10 @@ class CFD_Data(object):
         ri_gridded = nearest(x3d,y3d,z3d)
         
         #$print('@(CFD_Data)>> Setting the tri-linear interpolator ...')
-        self.interpolate = RegularGridInterpolator((self.uo,self.uo,self.zo),ri_gridded)
+        self.interpolate = RegularGridInterpolator((self.uo,self.uo,self.zo),
+                                                   ri_gridded,
+                                                   bounds_error=False,
+                                                   fill_value = None)
 
     def __call__(self,xi,yi,zi,s):
         xyzi = np.stack([xi,yi,zi],xi.ndim)
@@ -76,7 +81,8 @@ def rayTrace(cfd,params,nH=81,cfd_nPx=43):
     N_RAY = params['xyz0'].shape[0]
     #print('Ray tracing (N_RAY=%d):'%N_RAY)
     cfd_opd = np.ones(N_RAY)*np.nan
-    v123 = params['v1']*params['v2']*params['v3']*params['m']
+    #v123 = params['v1']*params['v2']*params['v3']*params['m']
+    v123 = params['m']
 
     a = 0
     step = 200000
@@ -153,61 +159,39 @@ def lambda_handler(event, context):
 
     for record in event['Records']:
 
+        #print(record)
+        bucket = urllib.parse.unquote(record['s3']['bucket']['name'])
+        key = urllib.parse.unquote(record['s3']['object']['key'])
+        s3 = boto3.resource('s3')
+
+        filename, file_extension = os.path.splitext(key)
+        filename, file_extension = os.path.splitext(filename)
+        upkey = filename+'.npz'
+
         try:
+            s3.Object(bucket, upkey).load()
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == "404":
+                print(f"Downloading {key}")
+                raw_data = np.loadtxt(StringIO(gzip.decompress(s3.Object(bucket, key).get()['Body'].read()).decode('utf-8')),delimiter=',',skiprows=1)
+                print(f"Gridding dome seeing")
+                cfd = CFD_Data(raw_data,nH=101,nPx=525)
 
-            #print(record)
-            bucket = urllib.parse.unquote(record['s3']['bucket']['name'])
-            key = urllib.parse.unquote(record['s3']['object']['key'])
-            ##$print(key)
-            downfile = '/tmp/'+key.split('/')[-1]
-            s3.download_file(bucket,key,downfile)
-            #$print('@(CFD_Data)>> Loading %s...'%downfile)
+                print(f"Downloading ray tracing parameter")
+                ceo = np.load(BytesIO(s3.Object('cfd.archive','gs_onaxis_params_512.npz').get()['Body'].read()))
+                print("Ray tracing")
+                data = rayTrace(cfd,ceo,nH=101)
 
-            inF = gzip.GzipFile(downfile,'rb')
-            data = inF.read()
-            inF.close()
-            csvfile = '/tmp/data.csv'
-            outF = open(csvfile,'wb')
-            outF.write(data)
-            outF.close()
-            os.remove(downfile)
-            raw_data = np.loadtxt(csvfile,
-                                  delimiter=',',skiprows=1)
-            os.remove(csvfile)
-            cfd = CFD_Data(raw_data,nH=101,nPx=525)
-
-            ceodatafile = '/tmp/gs_onaxis_params_512.npz'
-            if not os.path.isfile(ceodatafile):
-                s3.download_file('cfd.archive','gs_onaxis_params_512.npz',ceodatafile)
-            ceo = np.load(ceodatafile)
-
-            data = rayTrace(cfd,ceo,nH=101)
-
-            filename, file_extension = os.path.splitext(key)
-            filename, file_extension = os.path.splitext(filename)
-            upkey = filename+'.npz'
-
-            upfile='/tmp/'+upkey.split('/')[-1]
-
-            #savemat(upfile,data)
-            np.savez(upfile,**data)
-            s3.upload_file(upfile,bucket,upkey)
-            os.remove(upfile)
-
-            ##$print('@(CFD_Data)>> Removed %s'%upfile)
-
-        except:
-
-            key = urllib.parse.unquote(record['s3']['object']['key'])
-            downfile = '/tmp/'+key
-            if os.path.isfile(downfile):
-                os.remove(downfile)
-            #s3.delete_object(Bucket='cfd.scattered',Key=key)
-            #print('@(CFD_Data)>> %s deleted!'%key)
-            raise
-
-
-    return 'Interpolation completed!'
+                buf = BytesIO()
+                np.savez(buf,**data)
+                buf.seek(0)
+                print(f"Uploading {upkey}")
+                s3.Object(bucket, upkey).put(Body=buf.read())
+                return 'Interpolation completed!'
+            else:
+                raise
+        else:
+            return 'The object does exist!'
 
 if __name__ == "__main__":
     import json
