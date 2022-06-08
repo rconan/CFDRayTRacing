@@ -7,10 +7,10 @@ fn main() -> anyhow::Result<()> {
     let tree: RTree<TemperatureVelocityField> =
         RTree::from_gz("data/OPDData_OPD_Data_1.400028e+03.csv.gz")?;
     let now = Instant::now();
-    let opd = gs_onaxis_params.ray_trace(101, &tree);
+    let opd = gs_onaxis_params.ray_trace(&tree);
     println!("OPD in {}s", now.elapsed().as_secs());
 
-    serde_pickle::to_writer(&mut File::create("opd.pkl")?, &opd, Default::default())?;
+    serde_pickle::to_writer(&mut File::create("data/opd.pkl")?, &opd, Default::default())?;
 
     Ok(())
 }

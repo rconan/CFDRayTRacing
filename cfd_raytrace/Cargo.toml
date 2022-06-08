@@ -9,9 +9,16 @@ edition = "2021"
 anyhow = "1.0.57"
 csv = "1.1.6"
 flate2 = "1.0.24"
+linya = { version = "0.3.0", optional = true }
 nalgebra = "0.31.0"
 npyz = { version = "0.6.1", features = ["npz", "npyz-derive"] }
 rstar = "0.9.3"
 serde = { version = "1.0.137", features = ["derive"] }
 serde-pickle = "1.1.1"
 thiserror = "1.0.31"
+
+[features]
+progress = ["linya"]
+
+[profile.release]
+debug = true

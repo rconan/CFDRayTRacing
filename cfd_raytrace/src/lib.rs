@@ -1,7 +1,7 @@
 mod ray_tracing;
 pub use ray_tracing::GsOnAxisParams;
 mod cfd;
-pub use cfd::{FromCompressedCsv, TemperatureVelocityField};
+pub use cfd::{FromCompressedCsv, Shepard, TemperatureVelocityField};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
