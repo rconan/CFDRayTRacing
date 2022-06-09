@@ -1,6 +1,6 @@
 use cfd_raytrace::{FromCompressedCsv, RayTracer, TemperatureVelocityField};
 use rstar::RTree;
-use std::{fs::File, time::Instant};
+use std::time::Instant;
 
 #[cfg(not(feature = "s3"))]
 fn main() -> anyhow::Result<()> {
@@ -12,7 +12,7 @@ fn main() -> anyhow::Result<()> {
     println!("OPD in {}s", now.elapsed().as_secs());
 
     // serde_pickle::to_writer(&mut File::create("data/opd.pkl")?, &opd, Default::default())?;
-    bincode::serialize_into(&mut File::create("data/opd.bin")?, &opd)?;
+    bincode::serialize_into(&mut std::fs::File::create("data/opd.bin")?, &opd)?;
 
     Ok(())
 }
@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Downloading ray tracer ...");
     let now = Instant::now();
 
-    let gs_onaxis_params = RayTracer::from_npz("gs_onaxis_params_512.u8.npz").await?;
+    let gs_onaxis_params = RayTracer::from_npz("gs_onaxis_params_769.u8.npz").await?;
     println!(" -> done in {}s", now.elapsed().as_secs());
     println!("Downloading CFD data ...");
     let now = Instant::now();
