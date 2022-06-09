@@ -148,21 +148,6 @@ pub trait Shepard {
 impl Shepard for rstar::RTree<TemperatureVelocityField> {
     fn shepard(&self, query_point: &[f64; 3], max_squared_radius: f64) -> Option<f64> {
         let samples = self.locate_within_distance(query_point.clone(), max_squared_radius);
-        /*         let uv = data.try_fold((0f64, 0f64), |(mut u, mut v), f| {
-                   //print!(".");
-                   let d2 = f.distance_2(&query_point);
-                   if d2 > 0f64 {
-                       let rbf = d2.recip();
-                       u += rbf * f.refraction_index();
-                       v += rbf;
-                       Some((u, v))
-                   } else {
-                       None
-                   }
-               });
-               //println!("");
-               uv.map(|(num, denom)| num / denom)
-        */
         let mut num = None;
         let mut denom = None;
         for sample in samples {
