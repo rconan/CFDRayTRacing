@@ -1,12 +1,10 @@
 use super::Result;
+use async_trait::async_trait;
 use flate2::read::GzDecoder;
 use rstar::{PointDistance, RTree, RTreeObject, AABB};
 use serde::Deserialize;
+use std::io::{Cursor, Read};
 use std::path::Path;
-use std::{
-    fs::File,
-    io::{Cursor, Read},
-};
 
 // M1 vertez z coordinate in OSS reference frame
 const OSS_M1_VERTEX: f64 = 3.9;
@@ -18,7 +16,7 @@ pub struct TemperatureVelocityField {
     temperature: f64,
     #[serde(rename = "Velocity: Magnitude (m/s)")]
     #[allow(dead_code)]
-    velocity: f64,
+    velocity: Option<f64>,
     #[serde(rename = "X (m)")]
     x: f64,
     #[serde(rename = "Y (m)")]
@@ -77,16 +75,55 @@ impl PointDistance for TemperatureVelocityField {
 }
 
 /// Interface to compressed CFD optical turbulence csv file
+#[async_trait]
 pub trait FromCompressedCsv {
-    fn from_gz<P: AsRef<Path>>(path: P) -> Result<Self>
+    #[cfg(not(feature = "s3"))]
+    fn from_gz<P>(path: P) -> Result<Self>
     where
+        P: AsRef<Path> + std::convert::AsRef<str> + Send,
+        Self: Sized;
+    #[cfg(feature = "s3")]
+    async fn from_gz<P>(path: P) -> Result<Self>
+    where
+        P: AsRef<Path> + std::convert::AsRef<str> + Send,
         Self: Sized;
 }
+#[async_trait]
 impl FromCompressedCsv for RTree<TemperatureVelocityField> {
+    #[cfg(not(feature = "s3"))]
     /// Loads a csv file into a R-Tree
-    fn from_gz<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = File::open(path)?;
+    fn from_gz<P>(path: P) -> Result<Self>
+    where
+        P: AsRef<Path> + std::convert::AsRef<str> + Send,
+    {
+        let file = std::fs::File::open(path)?;
         let mut decoder = GzDecoder::new(file);
+        let mut bytes = Vec::new();
+        decoder.read_to_end(&mut bytes).unwrap();
+
+        let buff = Cursor::new(bytes);
+        let mut rdr = csv::Reader::from_reader(buff);
+        Ok(RTree::bulk_load(
+            rdr.deserialize()
+                .collect::<std::result::Result<Vec<TemperatureVelocityField>, csv::Error>>()?,
+        ))
+    }
+    #[cfg(feature = "s3")]
+    /// Loads a csv file into a R-Tree
+    async fn from_gz<P>(path: P) -> Result<Self>
+    where
+        P: AsRef<Path> + std::convert::AsRef<str> + Send,
+    {
+        use s3::bucket::Bucket;
+        use s3::creds::Credentials;
+        let bucket_name = "gmto.cfd.2022";
+        let region = "us-east-2".parse()?;
+        let credentials = Credentials::default().map_err(|e| s3::error::S3Error::Credentials(e))?;
+        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let (data, _) = bucket.get_object(path).await?;
+        let stream = std::io::Cursor::new(data);
+
+        let mut decoder = GzDecoder::new(stream);
         let mut bytes = Vec::new();
         decoder.read_to_end(&mut bytes).unwrap();
 
@@ -140,10 +177,9 @@ impl Shepard for rstar::RTree<TemperatureVelocityField> {
         }
         match (num, denom) {
             (Some(num), Some(denom)) => Some(num / denom),
-            _ => None, /*             _ => self
-                                      .nearest_neighbor(query_point)
-                                      .map(|nn| nn.refraction_index()),
-                       */
+            _ => self
+                .nearest_neighbor(query_point)
+                .map(|nn| nn.refraction_index()),
         }
     }
 }

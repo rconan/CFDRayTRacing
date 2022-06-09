@@ -1,4 +1,4 @@
-use cfd_raytrace::GsOnAxisParams;
+use cfd_raytrace::RayTracer;
 
 fn main() -> anyhow::Result<()> {
     let mut archive = npyz::npz::NpzArchive::open("data/gs_onaxis_params_512.u8.npz")?;
@@ -10,7 +10,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    let gs_onaxis_params = GsOnAxisParams::from_npz("data/gs_onaxis_params_512.u8.npz")?;
+    let gs_onaxis_params = RayTracer::from_npz("data/gs_onaxis_params_512.u8.npz")?;
     gs_onaxis_params.xyz[0]
         .row_iter()
         .take(3)
