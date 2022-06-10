@@ -1,0 +1,53 @@
+Resources:
+  CFDCompute:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties: 
+      ComputeEnvironmentName: CFDCompute
+      ComputeResources: 
+        AllocationStrategy: BEST_FIT
+        DesiredvCpus: 1
+        Ec2KeyPair: awsoregon
+        InstanceRole: arn:aws:iam::378722409401:instance-profile/ecsInstanceRole
+        InstanceTypes:
+          - optimal
+        MaxvCpus: 2005
+        MinvCpus: 0
+        SecurityGroupIds:
+          - sg-b3f854c8
+        Subnets:
+          - subnet-7979c31c
+          - subnet-ab946df2
+          - subnet-d2b877f9
+          - subnet-25fe2652
+        Type: EC2
+      ServiceRole: arn:aws:iam::378722409401:role/service-role/AWSBatchServiceRole
+      State: ENABLED
+      Type: MANAGED
+  CFDJobQueue:
+    Type: AWS::Batch::JobQueue
+    Properties: 
+      ComputeEnvironmentOrder: 
+        - ComputeEnvironment: !Ref CFDCompute
+          Order: 1
+      Priority: 1
+      JobQueueName: CFDJobQueue
+      State: ENABLED
+  CFDJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties: 
+      ContainerProperties: 
+        Command:
+          - /usr/bin/main
+        Environment:
+          - Name: CFD_CASE
+            Value: zen30az000_OS7
+        Image: 378722409401.dkr.ecr.us-west-2.amazonaws.com/gmto.im/cfd_raytrace:latest
+        ResourceRequirements:
+          - Type: VCPU
+            Value: '1'
+          - Type: MEMORY
+            Value: '2000'
+      JobDefinitionName: CFDJob
+      PlatformCapabilities: 
+        - EC2
+      Type: container
