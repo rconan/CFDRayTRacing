@@ -10,9 +10,9 @@ use std::path::Path;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Opd {
-    mean: f64,
-    values: Vec<f64>,
-    mask: Vec<bool>,
+    pub mean: f64,
+    pub values: Vec<f64>,
+    pub mask: Vec<bool>,
 }
 
 /// Ray tracing parameters
