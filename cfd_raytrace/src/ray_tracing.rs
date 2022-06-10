@@ -3,9 +3,17 @@ use super::cfd::Shepard;
 use super::{Result, TemperatureVelocityField};
 use nalgebra::DMatrix;
 use rstar::RTree;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "linya")]
 use std::fmt::Write;
 use std::path::Path;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Opd {
+    mean: f64,
+    values: Vec<f64>,
+    mask: Vec<bool>,
+}
 
 /// Ray tracing parameters
 pub struct RayTracer {
@@ -134,7 +142,7 @@ impl RayTracer {
     ///
     /// Ray tracing step is set to 0.125m.
     /// CFD data is interpolated using Shepard interpolation within a 1m<sup><\sup> radius sphere
-    pub fn ray_trace(&self, cfd_data: &RTree<TemperatureVelocityField>) -> Vec<f64> {
+    pub fn ray_trace(&self, cfd_data: &RTree<TemperatureVelocityField>) -> Opd {
         #[cfg(feature = "linya")]
         let mut progress = linya::Progress::new();
         #[cfg(feature = "linya")]
@@ -199,12 +207,10 @@ impl RayTracer {
         let mean_opl = opl.iter().cloned().sum::<f64>() / opl.len() as f64;
         //dbg!(mean_opl);
         let zeroed_opl = opl.into_iter().map(|x| x - mean_opl);
-        let mut opd = vec![f64::NAN; self.mask.len()];
-        opd.iter_mut()
-            .zip(&self.mask)
-            .filter_map(|(opd, &mask)| mask.then(|| opd))
-            .zip(zeroed_opl)
-            .for_each(|(opd, zopl)| *opd = zopl);
-        opd
+        Opd {
+            mean: mean_opl,
+            values: zeroed_opl.collect(),
+            mask: self.mask.clone(),
+        }
     }
 }

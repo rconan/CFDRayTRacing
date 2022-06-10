@@ -1,5 +1,5 @@
 mod ray_tracing;
-pub use ray_tracing::RayTracer;
+pub use ray_tracing::{Opd, RayTracer};
 mod cfd;
 pub use cfd::{FromCompressedCsv, Shepard, TemperatureVelocityField};
 
