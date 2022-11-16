@@ -4,19 +4,19 @@ use std::time::Instant;
 
 #[cfg(not(feature = "s3"))]
 fn main() -> anyhow::Result<()> {
-    let gs_onaxis_params =
-        RayTracer::from_npz("data/gs_onaxis_params_512.u8.npz")?.ray_tracing_step(0.5);
+    let gs_onaxis_params = RayTracer::from_npz("data/gs_onaxis_params_1031.u8.npz")?;
     let tree: RTree<TemperatureVelocityField> =
         RTree::from_gz("data/optvol_optvol_3.000000e+02.csv.gz")?;
     let now = Instant::now();
     let opd = gs_onaxis_params.ray_trace(&tree);
     println!("OPD in {}s", now.elapsed().as_secs());
 
-    // serde_pickle::to_writer(&mut File::create("data/opd.pkl")?, &opd, Default::default())?;
-    bincode::serialize_into(&mut std::fs::File::create("data/opd.bin")?, &opd)?;
+    bincode::serialize_into(&mut std::fs::File::create("data/opd_0025.bin")?, &opd)?;
 
     Ok(())
 }
+
+const N_PX: usize = 1031;
 
 #[cfg(feature = "s3")]
 #[tokio::main]
@@ -52,13 +52,11 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Downloading ray tracer ...");
     let now = Instant::now();
-    let gs_onaxis_params = RayTracer::from_npz("gs_onaxis_params_769.u8.npz").await?;
+    let gs_onaxis_params = RayTracer::from_npz(format!("gs_onaxis_params_{N_PX}.u8.npz")).await?;
     println!(" -> done in {}s", now.elapsed().as_secs());
     println!("Downloading CFD data ...");
     let now = Instant::now();
-    let key = Path::new(&key);
-    let tree: RTree<TemperatureVelocityField> =
-        RTree::from_gz(key.to_str().expect("failed to convert path to str")).await?;
+    let tree: RTree<TemperatureVelocityField> = RTree::from_gz(key.as_str()).await?;
     println!(" -> done in {}s", now.elapsed().as_secs());
 
     /*let (gs_onaxis_params, tree) = tokio::join!(
@@ -69,7 +67,6 @@ async fn main() -> anyhow::Result<()> {
     let opd = gs_onaxis_params.ray_trace(&tree);
     println!("OPD in {}s", now.elapsed().as_secs());
 
-    println!("Uploading OPD ...");
     let now = Instant::now();
 
     let bucket = {
@@ -79,6 +76,12 @@ async fn main() -> anyhow::Result<()> {
         Bucket::new(bucket_name, region, credentials)?
     };
 
+    let key = key.replace(
+        "/optvol/optvol_optvol_",
+        &format!("/optvol/{N_PX}/optvol_optvol_"),
+    );
+    let key = Path::new(&key);
+    println!("Uploading OPD {key:?}...");
     let stream = bincode::serialize(&opd)?;
     bucket
         .put_object(
@@ -88,7 +91,8 @@ async fn main() -> anyhow::Result<()> {
                 .expect("failed to convert path to str"),
             &stream,
         )
-        .await?;
+        .await
+        .expect(&format!("failed to upload {:?} to gmto.im.grim", key));
     println!(" -> done in {}s", now.elapsed().as_secs());
 
     //serde_pickle::to_writer(&mut File::create("data/opd.pkl")?, &opd, Default::default())?;
