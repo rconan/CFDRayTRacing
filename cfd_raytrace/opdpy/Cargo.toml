@@ -1,0 +1,13 @@
+[package]
+name = "opdpy"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cfd_raytrace = { version = "0.1.0", path = ".." }
+serde = { version = "1.0.147", features = ["derive"] }
+serde-generate = "0.24.0"
+serde-reflection = "0.3.6"
+serde_yaml = "0.9.14"
